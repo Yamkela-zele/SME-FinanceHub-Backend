@@ -1,0 +1,527 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  BUSINESS_OWNER
+  ACCOUNTANT
+  FUNDING_PARTNER
+  SYSTEM_ADMIN
+}
+
+enum UserStatus {
+  PENDING_EMAIL_VERIFICATION
+  PENDING_ADMIN_REVIEW
+  PENDING_ACTIVATION
+  ACTIVE
+  SUSPENDED
+  REJECTED
+  CLOSED
+}
+
+enum BusinessVerificationStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+}
+
+enum VerificationRequestStatus {
+  PENDING_VERIFICATION
+  VERIFICATION_IN_PROGRESS
+  AUTOMATICALLY_VERIFIED
+  MANUALLY_VERIFIED
+  VERIFIED_WITH_LIMITATIONS
+  PENDING_MANUAL_REVIEW
+  ADDITIONAL_INFORMATION_REQUIRED
+  UNABLE_TO_VERIFY
+  VERIFICATION_FAILED
+  REJECTED
+  EXPIRED
+}
+
+enum VerificationCheckStatus {
+  NOT_CHECKED
+  PENDING
+  VERIFIED
+  FAILED
+  NOT_APPLICABLE
+}
+
+enum AccountantApplicationStatus {
+  PENDING_ADMIN_APPROVAL
+  UNDER_REVIEW
+  CHANGES_REQUIRED
+  APPROVED
+  REJECTED
+  WITHDRAWN
+}
+
+enum InvitationStatus {
+  PENDING
+  SENT
+  ACCEPTED
+  EXPIRED
+  REVOKED
+  FAILED
+}
+
+enum EmailDeliveryStatus {
+  QUEUED
+  SENDING
+  SENT
+  FAILED
+}
+
+enum TxType {
+  INCOME
+  EXPENSE
+}
+
+enum InvoiceStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+}
+
+enum ApplicationStatus {
+  RECEIVED
+  ASSESSING
+  INFO_REQUESTED
+  APPROVED
+  DECLINED
+}
+
+model User {
+  id                             String                         @id @default(cuid())
+  email                          String                         @unique
+  passwordHash                   String                         @default("")
+  name                           String
+  phone                          String?
+  role                           Role
+  status                         UserStatus                     @default(PENDING_EMAIL_VERIFICATION)
+  emailVerifiedAt                DateTime?
+  termsAcceptedAt                DateTime?
+  privacyAcknowledgedAt          DateTime?
+  businessVerificationsSubmitted BusinessVerification[]         @relation("VerificationApplicant")
+  businessVerificationsReviewed  BusinessVerification[]         @relation("VerificationReviewer")
+  verificationEvents             BusinessVerificationEvent[]
+  verificationEvidence           BusinessVerificationEvidence[]
+  passwordChangedAt              DateTime?
+  activatedAt                    DateTime?
+  sessionVersion                 Int                            @default(0)
+  businessId                     String?
+  business                       Business?                      @relation(fields: [businessId], references: [id])
+  memberships                    BusinessMembership[]
+  ownedBusinesses                Business[]                     @relation("BusinessOwner")
+  createdFundingPartners         FundingPartner[]               @relation("FundingPartnerCreator")
+  authorisedShares               BusinessShare[]                @relation("ShareAuthoriser")
+  emailVerification              EmailVerificationToken[]
+  passwordSetupTokens            PasswordSetupToken[]
+  passwordResetTokens            PasswordResetToken[]
+  invitations                    AccountInvitation[]
+  createdInvitations             AccountInvitation[]            @relation("InvitationCreator")
+  emailDeliveries                EmailDeliveryLog[]
+  accountantApplications         AccountantApplication[]        @relation("AccountantApplicant")
+  submittedApplications          AccountantApplication[]        @relation("AccountantSubmitter")
+  reviewedApplications           AccountantApplication[]        @relation("AccountantReviewer")
+  accountantReviews              AccountantReview[]
+  fundingPartner                 FundingPartner?
+  notifications                  Notification[]
+  auditLogs                      AuditLog[]
+  rateLimitBuckets               RateLimitBucket[]
+  createdAt                      DateTime                       @default(now())
+  updatedAt                      DateTime                       @updatedAt
+
+  @@index([businessId, role, status])
+}
+
+model Business {
+  id                        String                     @id @default(cuid())
+  name                      String
+  tradingName               String?
+  businessType              String?
+  industry                  String?
+  registrationStatus        String?
+  registrationNumber        String?                    @unique
+  verificationStatus        BusinessVerificationStatus @default(PENDING)
+  verifiedAt                DateTime?
+  verificationNotes         String?                    @db.Text
+  ownerRelationship         String?
+  ownerAuthorityDescription String?                    @db.Text
+  address                   String?
+  province                  String?
+  municipality              String?
+  description               String?                    @db.Text
+  website                   String?
+  sector                    String?
+  readinessScore            Int                        @default(0)
+  plan                      String                     @default("Starter")
+  ownerId                   String?
+  owner                     User?                      @relation("BusinessOwner", fields: [ownerId], references: [id])
+  memberships               BusinessMembership[]
+  reports                   Report[]
+  readiness                 ReadinessItem[]
+  users                     User[]
+  customers                 Customer[]
+  transactions              Transaction[]
+  invoices                  Invoice[]
+  applications              FundingApplication[]
+  accountantApplications    AccountantApplication[]
+  invitations               AccountInvitation[]
+  shares                    BusinessShare[]
+  verification              BusinessVerification?
+  createdAt                 DateTime                   @default(now())
+
+  @@index([name])
+}
+
+model BusinessMembership {
+  id         String    @id @default(cuid())
+  businessId String
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role       Role
+  createdAt  DateTime  @default(now())
+  revokedAt  DateTime?
+
+  @@unique([businessId, userId])
+  @@index([userId, revokedAt])
+}
+
+model FundingPartner {
+  id                String          @id @default(cuid())
+  userId            String          @unique
+  user              User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organisationName  String          @unique
+  organisationType  String
+  website           String?
+  address           String?
+  province          String?
+  municipality      String?
+  programmes        String?         @db.Text
+  description       String?         @db.Text
+  verificationNotes String?         @db.Text
+  createdById       String
+  createdBy         User            @relation("FundingPartnerCreator", fields: [createdById], references: [id])
+  createdAt         DateTime        @default(now())
+  shares            BusinessShare[]
+}
+
+model BusinessShare {
+  id               String         @id @default(cuid())
+  businessId       String
+  business         Business       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  fundingPartnerId String
+  fundingPartner   FundingPartner @relation(fields: [fundingPartnerId], references: [id], onDelete: Cascade)
+  authorisedById   String
+  authorisedBy     User           @relation("ShareAuthoriser", fields: [authorisedById], references: [id])
+  createdAt        DateTime       @default(now())
+  expiresAt        DateTime?
+  revokedAt        DateTime?
+
+  @@index([fundingPartnerId, revokedAt, expiresAt])
+}
+
+model BusinessVerification {
+  id                               String                         @id @default(cuid())
+  businessId                       String                         @unique
+  business                         Business                       @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  submittedByUserId                String
+  submittedBy                      User                           @relation("VerificationApplicant", fields: [submittedByUserId], references: [id])
+  registrationNumber               String?
+  submittedBusinessName            String
+  businessType                     String
+  registrationStatus               String
+  applicantRelationship            String
+  authorityDescription             String                         @db.Text
+  provider                         String                         @default("MANUAL_REVIEW")
+  providerReference                String                         @unique
+  submissionVersion                Int                            @default(1)
+  businessVerificationStatus       VerificationCheckStatus        @default(PENDING)
+  representativeVerificationStatus VerificationCheckStatus        @default(PENDING)
+  overallStatus                    VerificationRequestStatus      @default(PENDING_MANUAL_REVIEW)
+  providerCheckedAt                DateTime?
+  reviewedByUserId                 String?
+  reviewedBy                       User?                          @relation("VerificationReviewer", fields: [reviewedByUserId], references: [id])
+  reviewedAt                       DateTime?
+  reviewReason                     String?                        @db.Text
+  lastSuccessfulCheckAt            DateTime?
+  expiresAt                        DateTime?
+  createdAt                        DateTime                       @default(now())
+  updatedAt                        DateTime                       @updatedAt
+  events                           BusinessVerificationEvent[]
+  evidence                         BusinessVerificationEvidence[]
+
+  @@index([overallStatus, createdAt])
+  @@index([submittedByUserId, createdAt])
+}
+
+model BusinessVerificationEvent {
+  id             String                     @id @default(cuid())
+  verificationId String
+  verification   BusinessVerification       @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  actorId        String?
+  actor          User?                      @relation(fields: [actorId], references: [id])
+  action         String
+  fromStatus     VerificationRequestStatus?
+  toStatus       VerificationRequestStatus?
+  reason         String?                    @db.Text
+  createdAt      DateTime                   @default(now())
+
+  @@index([verificationId, createdAt])
+}
+
+model BusinessVerificationEvidence {
+  id                String               @id @default(cuid())
+  verificationId    String
+  verification      BusinessVerification @relation(fields: [verificationId], references: [id], onDelete: Cascade)
+  uploadedById      String
+  uploadedBy        User                 @relation(fields: [uploadedById], references: [id])
+  category          String
+  submissionVersion Int
+  originalName      String
+  mimeType          String
+  sizeBytes         Int
+  sha256            String
+  storageKey        String               @unique
+  createdAt         DateTime             @default(now())
+
+  @@index([verificationId, createdAt])
+}
+
+model AccountantApplication {
+  id               String                      @id @default(cuid())
+  businessId       String
+  business         Business                    @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  submittedById    String
+  submittedBy      User                        @relation("AccountantSubmitter", fields: [submittedById], references: [id])
+  applicantId      String?
+  applicant        User?                       @relation("AccountantApplicant", fields: [applicantId], references: [id])
+  firstName        String
+  lastName         String
+  email            String
+  phone            String
+  jobTitle         String?
+  responsibilities String
+  reason           String?
+  status           AccountantApplicationStatus @default(PENDING_ADMIN_APPROVAL)
+  reviewedById     String?
+  reviewedBy       User?                       @relation("AccountantReviewer", fields: [reviewedById], references: [id])
+  submittedAt      DateTime                    @default(now())
+  reviewedAt       DateTime?
+  reviewNotes      String?                     @db.Text
+  reviews          AccountantReview[]
+  invitations      AccountInvitation[]
+
+  @@index([status, submittedAt])
+  @@index([businessId, email])
+}
+
+model AccountantReview {
+  id            String                @id @default(cuid())
+  applicationId String
+  application   AccountantApplication @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+  reviewerId    String
+  reviewer      User                  @relation(fields: [reviewerId], references: [id])
+  action        String
+  notes         String?               @db.Text
+  createdAt     DateTime              @default(now())
+
+  @@index([applicationId, createdAt])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model PasswordSetupToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, expiresAt])
+}
+
+model AccountInvitation {
+  id                      String                 @id @default(cuid())
+  email                   String
+  role                    Role
+  userId                  String?
+  user                    User?                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  businessId              String?
+  business                Business?              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  accountantApplicationId String?
+  accountantApplication   AccountantApplication? @relation(fields: [accountantApplicationId], references: [id], onDelete: Cascade)
+  createdById             String
+  createdBy               User                   @relation("InvitationCreator", fields: [createdById], references: [id])
+  tokenHash               String                 @unique
+  status                  InvitationStatus       @default(PENDING)
+  expiresAt               DateTime
+  sentAt                  DateTime?
+  usedAt                  DateTime?
+  createdAt               DateTime               @default(now())
+  emailDeliveries         EmailDeliveryLog[]
+
+  @@index([email, status])
+  @@index([userId, status])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  link      String?
+  urgent    Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt, createdAt])
+}
+
+model EmailDeliveryLog {
+  id                String              @id @default(cuid())
+  userId            String?
+  user              User?               @relation(fields: [userId], references: [id], onDelete: SetNull)
+  toEmail           String
+  template          String
+  subject           String
+  encryptedPayload  String              @db.LongText
+  invitationId      String?
+  invitation        AccountInvitation?  @relation(fields: [invitationId], references: [id], onDelete: SetNull)
+  status            EmailDeliveryStatus @default(QUEUED)
+  attempts          Int                 @default(0)
+  lastError         String?             @db.Text
+  providerMessageId String?
+  nextAttemptAt     DateTime            @default(now())
+  sentAt            DateTime?
+  createdAt         DateTime            @default(now())
+
+  @@index([status, nextAttemptAt])
+}
+
+model RateLimitBucket {
+  key       String   @id
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  count     Int
+  resetAt   DateTime
+  createdAt DateTime @default(now())
+
+  @@index([resetAt])
+}
+
+model Customer {
+  id         String    @id @default(cuid())
+  businessId String
+  business   Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name       String
+  email      String?
+  invoices   Invoice[]
+}
+
+model Transaction {
+  id          String   @id @default(cuid())
+  businessId  String
+  business    Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  type        TxType
+  description String
+  category    String
+  amountCents Int
+  date        DateTime
+  reviewed    Boolean  @default(false)
+  issue       String?
+  createdAt   DateTime @default(now())
+
+  @@index([businessId, date])
+}
+
+model Invoice {
+  id         String        @id @default(cuid())
+  businessId String
+  business   Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  customerId String
+  customer   Customer      @relation(fields: [customerId], references: [id])
+  number     String
+  status     InvoiceStatus @default(DRAFT)
+  totalCents Int
+  paidCents  Int           @default(0)
+  dueDate    DateTime
+
+  @@unique([businessId, number])
+  @@index([status, dueDate])
+}
+
+model FundingApplication {
+  id          String            @id @default(cuid())
+  businessId  String
+  business    Business          @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  amountCents Int
+  purpose     String
+  repaidCents Int               @default(0)
+  status      ApplicationStatus @default(RECEIVED)
+  createdAt   DateTime          @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     User?    @relation(fields: [actorId], references: [id])
+  action    String
+  target    String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+model Report {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  name       String
+  period     String
+  format     String   @default("Not generated")
+  createdAt  DateTime @default(now())
+}
+
+model ReadinessItem {
+  id         String   @id @default(cuid())
+  businessId String
+  business   Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  label      String
+  complete   Boolean  @default(false)
+  sort       Int      @default(0)
+}
